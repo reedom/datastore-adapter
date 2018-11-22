@@ -1,12 +1,13 @@
 package datastoreadapter
 
 import (
-	"cloud.google.com/go/datastore"
 	"context"
+	"fmt"
+	"runtime"
+
+	"cloud.google.com/go/datastore"
 	"github.com/casbin/casbin/model"
 	"github.com/casbin/casbin/persist"
-	"github.com/pkg/errors"
-	"runtime"
 )
 
 const casbinKind = "casbin"
@@ -111,15 +112,96 @@ func (a *adapter) SavePolicy(model model.Model) error {
 }
 
 func (a *adapter) AddPolicy(sec string, ptype string, rule []string) error {
-	return errors.New("not implemented")
+
+	ctx := context.Background()
+	line := savePolicyLine(ptype, rule)
+
+	_, err := a.db.Put(ctx, datastore.IncompleteKey(casbinKind, nil), &line)
+	return err
 }
 
 func (a *adapter) RemovePolicy(sec string, ptype string, rule []string) error {
-	return errors.New("not implemented")
+
+	var rules []*CasbinRule
+
+	line := savePolicyLine(ptype, rule)
+
+	ctx := context.Background()
+	query := datastore.NewQuery(casbinKind).
+		Filter("p_type =", line.PType).
+		Filter("v0 =", line.V0).
+		Filter("v1 =", line.V1).
+		Filter("v2 =", line.V2).
+		Filter("v3 =", line.V3).
+		Filter("v4 =", line.V4)
+
+	keys, err := a.db.GetAll(ctx, query, &rules)
+	if err != nil {
+		switch err {
+		case datastore.ErrNoSuchEntity:
+			return nil
+		default:
+			return err
+		}
+	}
+	return a.db.DeleteMulti(ctx, keys)
 }
 
 func (a *adapter) RemoveFilteredPolicy(sec string, ptype string, fieldIndex int, fieldValues ...string) error {
-	return errors.New("not implemented")
+
+	ctx := context.Background()
+
+	var rules []*CasbinRule
+
+	selector := make(map[string]interface{})
+	selector["p_type"] = ptype
+
+	if fieldIndex <= 0 && 0 < fieldIndex+len(fieldValues) {
+		if fieldValues[0-fieldIndex] != "" {
+			selector["v0"] = fieldValues[0-fieldIndex]
+		}
+	}
+	if fieldIndex <= 1 && 1 < fieldIndex+len(fieldValues) {
+		if fieldValues[1-fieldIndex] != "" {
+			selector["v1"] = fieldValues[1-fieldIndex]
+		}
+	}
+	if fieldIndex <= 2 && 2 < fieldIndex+len(fieldValues) {
+		if fieldValues[2-fieldIndex] != "" {
+			selector["v2"] = fieldValues[2-fieldIndex]
+		}
+	}
+	if fieldIndex <= 3 && 3 < fieldIndex+len(fieldValues) {
+		if fieldValues[3-fieldIndex] != "" {
+			selector["v3"] = fieldValues[3-fieldIndex]
+		}
+	}
+	if fieldIndex <= 4 && 4 < fieldIndex+len(fieldValues) {
+		if fieldValues[4-fieldIndex] != "" {
+			selector["v4"] = fieldValues[4-fieldIndex]
+		}
+	}
+	if fieldIndex <= 5 && 5 < fieldIndex+len(fieldValues) {
+		if fieldValues[5-fieldIndex] != "" {
+			selector["v5"] = fieldValues[5-fieldIndex]
+		}
+	}
+
+	query := datastore.NewQuery(casbinKind)
+	for k, v := range selector {
+		query = query.Filter(fmt.Sprintf("%s =", k), v)
+	}
+
+	keys, err := a.db.GetAll(ctx, query, &rules)
+	if err != nil {
+		switch err {
+		case datastore.ErrNoSuchEntity:
+			return nil
+		default:
+			return err
+		}
+	}
+	return a.db.DeleteMulti(ctx, keys)
 }
 
 func savePolicyLine(ptype string, rule []string) CasbinRule {

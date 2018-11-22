@@ -119,4 +119,74 @@ func TestAdapter(t *testing.T) {
 	// This is still the original policy.
 	testGetPolicy(t, e, [][]string{{"alice", "data1", "read"}, {"bob", "data2", "write"}, {"data2_admin", "data2", "read"}, {"data2_admin", "data2", "write"}})
 
+	// Now we enable the AutoSave.
+	e.EnableAutoSave(true)
+
+	// Because AutoSave is enabled, the policy change not only affects the policy in Casbin enforcer,
+	// but also affects the policy in the storage.
+	e.AddPolicy("alice", "data1", "write")
+	// Reload the policy from the storage to see the effect.
+	if err := e.LoadPolicy(); err != nil {
+		t.Errorf("Expected LoadPolicy() to be successful; got %v", err)
+	}
+	// The policy has a new rule: {"alice", "data1", "write"}.
+	testGetPolicy(t, e, [][]string{{"alice", "data1", "read"}, {"bob", "data2", "write"}, {"data2_admin", "data2", "read"}, {"data2_admin", "data2", "write"}, {"alice", "data1", "write"}})
+
+	// Remove the added rule.
+	e.RemovePolicy("alice", "data1", "write")
+	if err := a.RemovePolicy("p", "p", []string{"alice", "data1", "write"}); err != nil {
+		t.Errorf("Expected RemovePolicy() to be successful; got %v", err)
+	}
+	if err := e.LoadPolicy(); err != nil {
+		t.Errorf("Expected LoadPolicy() to be successful; got %v", err)
+	}
+	testGetPolicy(t, e, [][]string{{"alice", "data1", "read"}, {"bob", "data2", "write"}, {"data2_admin", "data2", "read"}, {"data2_admin", "data2", "write"}})
+
+	// Remove "data2_admin" related policy rules via a filter.
+	// Two rules: {"data2_admin", "data2", "read"}, {"data2_admin", "data2", "write"} are deleted.
+	e.RemoveFilteredPolicy(0, "data2_admin")
+	if err := e.LoadPolicy(); err != nil {
+		t.Errorf("Expected LoadPolicy() to be successful; got %v", err)
+	}
+	testGetPolicy(t, e, [][]string{{"alice", "data1", "read"}, {"bob", "data2", "write"}})
+
+	e.RemoveFilteredPolicy(1, "data1")
+	if err := e.LoadPolicy(); err != nil {
+		t.Errorf("Expected LoadPolicy() to be successful; got %v", err)
+	}
+	testGetPolicy(t, e, [][]string{{"bob", "data2", "write"}})
+
+	e.RemoveFilteredPolicy(2, "write")
+	if err := e.LoadPolicy(); err != nil {
+		t.Errorf("Expected LoadPolicy() to be successful; got %v", err)
+	}
+	testGetPolicy(t, e, [][]string{})
+}
+
+func TestDeleteFilteredAdapter(t *testing.T) {
+	a := NewAdapter(getDatastore())
+	e := casbin.NewEnforcer("examples/rbac_tenant_service.conf", a)
+
+	e.AddPolicy("domain1", "alice", "data3", "read", "accept", "service1")
+	e.AddPolicy("domain1", "alice", "data3", "write", "accept", "service2")
+
+	// Reload the policy from the storage to see the effect.
+	if err := e.LoadPolicy(); err != nil {
+		t.Errorf("Expected LoadPolicy() to be successful; got %v", err)
+	}
+	// The policy has a new rule: {"alice", "data1", "write"}.
+	testGetPolicy(t, e, [][]string{{"domain1", "alice", "data3", "read", "accept", "service1"},
+		{"domain1", "alice", "data3", "write", "accept", "service2"}})
+	// test RemoveFiltered Policy with "" fileds
+	e.RemoveFilteredPolicy(0, "domain1", "", "", "read")
+	if err := e.LoadPolicy(); err != nil {
+		t.Errorf("Expected LoadPolicy() to be successful; got %v", err)
+	}
+	testGetPolicy(t, e, [][]string{{"domain1", "alice", "data3", "write", "accept", "service2"}})
+
+	e.RemoveFilteredPolicy(0, "domain1", "", "", "", "", "service2")
+	if err := e.LoadPolicy(); err != nil {
+		t.Errorf("Expected LoadPolicy() to be successful; got %v", err)
+	}
+	testGetPolicy(t, e, [][]string{})
 }
