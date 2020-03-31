@@ -23,9 +23,20 @@ type CasbinRule struct {
 	V5    string `datastore:"v5"`
 }
 
+type AdapterConfig struct {
+	// Datastore kind name.
+	// Optional. (Default: "casbin")
+	Kind string
+	// Datastore namespace.
+	// Optional. (Default: "")
+	Namespace string
+}
+
 // adapter represents the GCP datastore adapter for policy storage.
 type adapter struct {
 	db *datastore.Client
+	kind string
+	namespace string
 }
 
 // finalizer is the destructor for adapter.
@@ -39,7 +50,18 @@ func (a *adapter) close() {
 
 // NewAdapter is the constructor for Adapter. A valid datastore client must be provided.
 func NewAdapter(db *datastore.Client) persist.Adapter {
-	a := &adapter{db}
+	return NewAdapterWithConfig(db, AdapterConfig{casbinKind, ""})
+}
+
+// NewAdapter is the constructor for Adapter. A valid datastore client must be provided.
+func NewAdapterWithConfig(db *datastore.Client, config AdapterConfig) persist.Adapter {
+	kind := casbinKind
+	if config.Kind != "" {
+		kind = config.Kind
+	}
+	namespace := config.Namespace
+
+	a := &adapter{db, kind, namespace}
 
 	// Call the destructor when the object is released.
 	runtime.SetFinalizer(a, finalizer)
@@ -52,7 +74,7 @@ func (a *adapter) LoadPolicy(model model.Model) error {
 	var rules []*CasbinRule
 
 	ctx := context.Background()
-	query := datastore.NewQuery(casbinKind)
+	query := datastore.NewQuery(a.kind).Namespace(a.namespace)
 	_, err := a.db.GetAll(ctx, query, &rules)
 
 	if err != nil {
@@ -71,7 +93,7 @@ func (a *adapter) SavePolicy(model model.Model) error {
 
 	// Drop all casbin entities
 	var rules []*CasbinRule
-	keys, err := a.db.GetAll(ctx, datastore.NewQuery(casbinKind), &rules)
+	keys, err := a.db.GetAll(ctx, datastore.NewQuery(a.kind).Namespace(a.namespace), &rules)
 	if err != nil {
 		return err
 	}
@@ -98,7 +120,8 @@ func (a *adapter) SavePolicy(model model.Model) error {
 	a.db.RunInTransaction(ctx, func(tx *datastore.Transaction) error {
 		for _, line := range lines {
 
-			key := datastore.IncompleteKey(casbinKind, nil)
+			key := datastore.IncompleteKey(a.kind, nil)
+			key.Namespace = a.namespace
 			_, err := tx.Put(key, line)
 			if err != nil {
 				return err
@@ -116,7 +139,9 @@ func (a *adapter) AddPolicy(sec string, ptype string, rule []string) error {
 	ctx := context.Background()
 	line := savePolicyLine(ptype, rule)
 
-	_, err := a.db.Put(ctx, datastore.IncompleteKey(casbinKind, nil), &line)
+	key := datastore.IncompleteKey(a.kind, nil)
+	key.Namespace = a.namespace
+	_, err := a.db.Put(ctx, key, &line)
 	return err
 }
 
@@ -127,7 +152,7 @@ func (a *adapter) RemovePolicy(sec string, ptype string, rule []string) error {
 	line := savePolicyLine(ptype, rule)
 
 	ctx := context.Background()
-	query := datastore.NewQuery(casbinKind).
+	query := datastore.NewQuery(a.kind).Namespace(a.namespace).
 		Filter("p_type =", line.PType).
 		Filter("v0 =", line.V0).
 		Filter("v1 =", line.V1).
@@ -187,7 +212,7 @@ func (a *adapter) RemoveFilteredPolicy(sec string, ptype string, fieldIndex int,
 		}
 	}
 
-	query := datastore.NewQuery(casbinKind)
+	query := datastore.NewQuery(a.kind).Namespace(a.namespace)
 	for k, v := range selector {
 		query = query.Filter(fmt.Sprintf("%s =", k), v)
 	}

@@ -66,12 +66,12 @@ func sameStringSlice(x, y []string) bool {
 	return false
 }
 
-func initPolicy(t *testing.T) {
+func initPolicy(t *testing.T, config AdapterConfig) {
 	// Because the DB is empty at first,
 	// so we need to load the policy from the file adapter (.CSV) first.
 	e := casbin.NewEnforcer("examples/rbac_model.conf", "examples/rbac_policy.csv")
 
-	a := NewAdapter(getDatastore())
+	a := NewAdapterWithConfig(getDatastore(), config)
 	// This is a trick to save the current policy to the DB.
 	// We can't call e.SavePolicy() because the adapter in the enforcer is still the file adapter.
 	// The current policy means the policy in the Casbin enforcer (aka in memory).
@@ -93,7 +93,8 @@ func initPolicy(t *testing.T) {
 }
 
 func TestAdapter(t *testing.T) {
-	initPolicy(t)
+	config := AdapterConfig{Kind: "casbin_test", Namespace: "unittest"}
+	initPolicy(t, config)
 
 	// Note: you don't need to look at the above code
 	// if you already have a working DB with policy inside.
@@ -101,7 +102,7 @@ func TestAdapter(t *testing.T) {
 	// Now the DB has policy, so we can provide a normal use case.
 	// Create an adapter and an enforcer.
 	// NewEnforcer() will load the policy automatically.
-	a := NewAdapter(getDatastore())
+	a := NewAdapterWithConfig(getDatastore(), config)
 	e := casbin.NewEnforcer("examples/rbac_model.conf", a)
 	testGetPolicy(t, e, [][]string{{"alice", "data1", "read"}, {"bob", "data2", "write"}, {"data2_admin", "data2", "read"}, {"data2_admin", "data2", "write"}})
 
@@ -189,4 +190,23 @@ func TestDeleteFilteredAdapter(t *testing.T) {
 		t.Errorf("Expected LoadPolicy() to be successful; got %v", err)
 	}
 	testGetPolicy(t, e, [][]string{})
+}
+
+func TestConfig(t *testing.T) {
+	config := AdapterConfig{Kind: "casbin_test", Namespace: "unittest"}
+	initPolicy(t, config)
+
+	// Use a difference kind name.
+	a := NewAdapterWithConfig(getDatastore(), AdapterConfig{Kind: "casbin_test_xx", Namespace: "unittest"})
+	e := casbin.NewEnforcer("examples/rbac_model.conf", a)
+	testGetPolicy(t, e, [][]string{})
+
+	// Use a difference namespace.
+	a = NewAdapterWithConfig(getDatastore(), AdapterConfig{Kind: "casbin_test", Namespace: "unittest_xx"})
+	e = casbin.NewEnforcer("examples/rbac_model.conf", a)
+	testGetPolicy(t, e, [][]string{})
+
+	a = NewAdapterWithConfig(getDatastore(), config)
+	e = casbin.NewEnforcer("examples/rbac_model.conf", a)
+	testGetPolicy(t, e, [][]string{{"alice", "data1", "read"}, {"bob", "data2", "write"}, {"data2_admin", "data2", "read"}, {"data2_admin", "data2", "write"}})
 }

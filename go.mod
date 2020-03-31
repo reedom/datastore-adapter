@@ -1,4 +1,6 @@
-module github.com/livingpackets/datastore-adapter
+module github.com/reedom/datastore-adapter
+
+go 1.14
 
 require (
 	cloud.google.com/go v0.33.1
