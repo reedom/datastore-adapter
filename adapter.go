@@ -6,8 +6,8 @@ import (
 	"runtime"
 
 	"cloud.google.com/go/datastore"
-	"github.com/casbin/casbin/model"
-	"github.com/casbin/casbin/persist"
+	"github.com/casbin/casbin/v2/model"
+	"github.com/casbin/casbin/v2/persist"
 )
 
 const casbinKind = "casbin"
