@@ -23,15 +23,6 @@ type CasbinRule struct {
 	V5    string `datastore:"v5"`
 }
 
-type AdapterConfig struct {
-	// Datastore kind name.
-	// Optional. (Default: "casbin")
-	Kind string
-	// Datastore namespace.
-	// Optional. (Default: "")
-	Namespace string
-}
-
 // adapter represents the GCP datastore adapter for policy storage.
 type adapter struct {
 	db *datastore.Client
@@ -50,11 +41,11 @@ func (a *adapter) close() {
 
 // NewAdapter is the constructor for Adapter. A valid datastore client must be provided.
 func NewAdapter(db *datastore.Client) persist.Adapter {
-	return NewAdapterWithConfig(db, AdapterConfig{casbinKind, ""})
+	return NewAdapterWithConfig(db, Config{casbinKind, ""})
 }
 
 // NewAdapter is the constructor for Adapter. A valid datastore client must be provided.
-func NewAdapterWithConfig(db *datastore.Client, config AdapterConfig) persist.Adapter {
+func NewAdapterWithConfig(db *datastore.Client, config Config) persist.Adapter {
 	kind := casbinKind
 	if config.Kind != "" {
 		kind = config.Kind
@@ -69,11 +60,17 @@ func NewAdapterWithConfig(db *datastore.Client, config AdapterConfig) persist.Ad
 	return a
 }
 
+func (a *adapter) newQuery() *datastore.Query {
+	return datastore.NewQuery(a.kind).
+		Namespace(a.namespace).
+		Filter("p_type >", "")
+}
+
 func (a *adapter) LoadPolicy(model model.Model) error {
 	var rules []*CasbinRule
 
 	ctx := context.Background()
-	query := datastore.NewQuery(a.kind).Namespace(a.namespace)
+	query := a.newQuery()
 	_, err := a.db.GetAll(ctx, query, &rules)
 
 	if err != nil {
@@ -91,7 +88,7 @@ func (a *adapter) SavePolicy(model model.Model) error {
 	ctx := context.Background()
 
 	// Drop all casbin entities
-	keys, err := a.db.GetAll(ctx, datastore.NewQuery(a.kind).Namespace(a.namespace).KeysOnly(), nil)
+	keys, err := a.db.GetAll(ctx, a.newQuery().KeysOnly(), nil)
 	if err != nil {
 		return err
 	}
@@ -151,7 +148,7 @@ func (a *adapter) RemovePolicy(sec string, ptype string, rule []string) error {
 	line := savePolicyLine(ptype, rule)
 
 	ctx := context.Background()
-	query := datastore.NewQuery(a.kind).Namespace(a.namespace).
+	query := a.newQuery().
 		Filter("p_type =", line.PType).
 		Filter("v0 =", line.V0).
 		Filter("v1 =", line.V1).
@@ -211,7 +208,7 @@ func (a *adapter) RemoveFilteredPolicy(sec string, ptype string, fieldIndex int,
 		}
 	}
 
-	query := datastore.NewQuery(a.kind).Namespace(a.namespace)
+	query := a.newQuery()
 	for k, v := range selector {
 		query = query.Filter(fmt.Sprintf("%s =", k), v)
 	}

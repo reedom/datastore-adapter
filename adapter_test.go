@@ -65,7 +65,7 @@ func SamePolicy(a, b [][]string) bool {
 	return true
 }
 
-func initPolicy(t *testing.T, config AdapterConfig) {
+func initPolicy(t *testing.T, config Config) {
 	// Because the DB is empty at first,
 	// so we need to load the policy from the file adapter (.CSV) first.
 	e, _ := casbin.NewEnforcer("examples/rbac_model.conf", "examples/rbac_policy.csv")
@@ -96,7 +96,7 @@ func initPolicy(t *testing.T, config AdapterConfig) {
 }
 
 func TestAdapter(t *testing.T) {
-	config := AdapterConfig{Kind: "casbin_test", Namespace: "unittest"}
+	config := Config{Kind: "casbin_test", Namespace: "unittest"}
 	initPolicy(t, config)
 
 	// Note: you don't need to look at the above code
@@ -215,18 +215,18 @@ func TestDeleteFilteredAdapter(t *testing.T) {
 }
 
 func TestConfig(t *testing.T) {
-	config := AdapterConfig{Kind: "casbin_test", Namespace: "unittest"}
+	config := Config{Kind: "casbin_test", Namespace: "unittest"}
 	initPolicy(t, config)
 
 	// Use a difference kind name.
-	a := NewAdapterWithConfig(getDatastore(), AdapterConfig{Kind: "casbin_test_xx", Namespace: "unittest"})
+	a := NewAdapterWithConfig(getDatastore(), Config{Kind: "casbin_test_xx", Namespace: "unittest"})
 	e, _ := casbin.NewEnforcer("examples/rbac_model.conf", a)
 	testGetPolicy(e, [][]string{}, func(actual, wants [][]string) {
 		t.Error("got: ", actual, ", wants ", wants)
 	})
 
 	// Use a difference namespace.
-	a = NewAdapterWithConfig(getDatastore(), AdapterConfig{Kind: "casbin_test", Namespace: "unittest_xx"})
+	a = NewAdapterWithConfig(getDatastore(), Config{Kind: "casbin_test", Namespace: "unittest_xx"})
 	e, _ = casbin.NewEnforcer("examples/rbac_model.conf", a)
 	testGetPolicy(e, [][]string{}, func(actual, wants [][]string) {
 		t.Error("got: ", actual, ", wants ", wants)
