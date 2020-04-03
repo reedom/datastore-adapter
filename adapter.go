@@ -70,7 +70,6 @@ func NewAdapterWithConfig(db *datastore.Client, config AdapterConfig) persist.Ad
 }
 
 func (a *adapter) LoadPolicy(model model.Model) error {
-
 	var rules []*CasbinRule
 
 	ctx := context.Background()
@@ -92,13 +91,9 @@ func (a *adapter) SavePolicy(model model.Model) error {
 	ctx := context.Background()
 
 	// Drop all casbin entities
-	var rules []*CasbinRule
-	keys, err := a.db.GetAll(ctx, datastore.NewQuery(a.kind).Namespace(a.namespace), &rules)
+	keys, err := a.db.GetAll(ctx, datastore.NewQuery(a.kind).Namespace(a.namespace).KeysOnly(), nil)
 	if err != nil {
 		return err
-	}
-	for _, k := range keys {
-		a.db.Delete(ctx, k)
 	}
 
 	var lines []interface{}
@@ -117,7 +112,11 @@ func (a *adapter) SavePolicy(model model.Model) error {
 		}
 	}
 
-	a.db.RunInTransaction(ctx, func(tx *datastore.Transaction) error {
+	_, err = a.db.RunInTransaction(ctx, func(tx *datastore.Transaction) error {
+		if err = tx.DeleteMulti(keys); err != nil {
+			return err
+		}
+
 		for _, line := range lines {
 
 			key := datastore.IncompleteKey(a.kind, nil)
@@ -131,7 +130,7 @@ func (a *adapter) SavePolicy(model model.Model) error {
 		return nil
 	})
 
-	return nil
+	return err
 }
 
 func (a *adapter) AddPolicy(sec string, ptype string, rule []string) error {
