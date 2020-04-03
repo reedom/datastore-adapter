@@ -3,6 +3,8 @@ package datastoreadapter
 import (
 	"context"
 	"os"
+	"sort"
+	"strings"
 	"testing"
 
 	"cloud.google.com/go/datastore"
@@ -20,51 +22,47 @@ func getDatastore() *datastore.Client {
 	return ds
 }
 
-func testGetPolicy(t *testing.T, e *casbin.Enforcer, res [][]string) {
-	myRes := e.GetPolicy()
-
-	if !sameStringSlice(flat(res), flat(myRes)) {
-		t.Error("Policy: ", myRes, ", supposed to be ", res)
+func testGetPolicy(e *casbin.Enforcer, wants [][]string, onFail func(actual, wants [][]string)) {
+	actual := e.GetPolicy()
+	if !SamePolicy(actual, wants) {
+		sortPolicy(actual)
+		sortPolicy(wants)
+		onFail(actual, wants)
 	}
-
 }
 
-func flat(arr2D [][]string) []string {
-
-	res := []string{}
-	for _, arr := range arr2D {
-		for _, e := range arr {
-			res = append(res, e)
+func sortPolicy(policy [][]string) {
+	sort.Slice(policy, func(i, j int) bool {
+		n := strings.Compare(policy[i][0], policy[j][0])
+		if n != 0 {
+			n = strings.Compare(policy[i][1], policy[j][1])
+			if n != 0 {
+				n = strings.Compare(policy[i][2], policy[j][2])
+			}
 		}
-	}
-
-	return res
+		return n < 0
+	})
 }
 
-func sameStringSlice(x, y []string) bool {
-	if len(x) != len(y) {
-		return false
+func SamePolicy(a, b [][]string) bool {
+	diff := make(map[string]bool, len(a))
+	for _, v := range a {
+		key := strings.Join(v, ",")
+		diff[key] = false
 	}
-	// create a map of string -> int
-	diff := make(map[string]int, len(x))
-	for _, _x := range x {
-		// 0 value for int is 0, so just increment a counter for the string
-		diff[_x]++
-	}
-	for _, _y := range y {
-		// If the string _y is not in diff bail out early
-		if _, ok := diff[_y]; !ok {
+	for _, v := range b {
+		key := strings.Join(v, ",")
+		if _, ok := diff[key]; !ok {
 			return false
 		}
-		diff[_y]--
-		if diff[_y] == 0 {
-			delete(diff, _y)
+		diff[key] = true
+	}
+	for _, v := range diff {
+		if !v {
+			return false
 		}
 	}
-	if len(diff) == 0 {
-		return true
-	}
-	return false
+	return true
 }
 
 func initPolicy(t *testing.T, config AdapterConfig) {
@@ -83,14 +81,18 @@ func initPolicy(t *testing.T, config AdapterConfig) {
 
 	// Clear the current policy.
 	e.ClearPolicy()
-	testGetPolicy(t, e, [][]string{})
+	testGetPolicy(e, [][]string{}, func(actual, wants [][]string) {
+		t.Error("got: ", actual, ", wants ", wants)
+	})
 
 	// Load the policy from DB.
 	err = a.LoadPolicy(e.GetModel())
 	if err != nil {
 		panic(err)
 	}
-	testGetPolicy(t, e, [][]string{{"alice", "data1", "read"}, {"bob", "data2", "write"}, {"data2_admin", "data2", "read"}, {"data2_admin", "data2", "write"}})
+	testGetPolicy(e, [][]string{{"alice", "data1", "read"}, {"bob", "data2", "write"}, {"data2_admin", "data2", "read"}, {"data2_admin", "data2", "write"}}, func(actual, wants [][]string) {
+		t.Error("got: ", actual, ", wants ", wants)
+	})
 }
 
 func TestAdapter(t *testing.T) {
@@ -105,7 +107,9 @@ func TestAdapter(t *testing.T) {
 	// NewEnforcer() will load the policy automatically.
 	a := NewAdapterWithConfig(getDatastore(), config)
 	e, _ := casbin.NewEnforcer("examples/rbac_model.conf", a)
-	testGetPolicy(t, e, [][]string{{"alice", "data1", "read"}, {"bob", "data2", "write"}, {"data2_admin", "data2", "read"}, {"data2_admin", "data2", "write"}})
+	testGetPolicy(e, [][]string{{"alice", "data1", "read"}, {"bob", "data2", "write"}, {"data2_admin", "data2", "read"}, {"data2_admin", "data2", "write"}}, func(actual, wants [][]string) {
+		t.Error("got: ", actual, ", wants ", wants)
+	})
 
 	// AutoSave is enabled by default.
 	// Now we disable it.
@@ -119,11 +123,12 @@ func TestAdapter(t *testing.T) {
 		t.Errorf("Expected LoadPolicy() to be successful; got %v", err)
 	}
 	// This is still the original policy.
-	testGetPolicy(t, e, [][]string{{"alice", "data1", "read"}, {"bob", "data2", "write"}, {"data2_admin", "data2", "read"}, {"data2_admin", "data2", "write"}})
+	testGetPolicy(e, [][]string{{"alice", "data1", "read"}, {"bob", "data2", "write"}, {"data2_admin", "data2", "read"}, {"data2_admin", "data2", "write"}}, func(actual, wants [][]string) {
+		t.Error("got: ", actual, ", wants ", wants)
+	})
 
 	// Now we enable the AutoSave.
 	e.EnableAutoSave(true)
-
 	// Because AutoSave is enabled, the policy change not only affects the policy in Casbin enforcer,
 	// but also affects the policy in the storage.
 	e.AddPolicy("alice", "data1", "write")
@@ -132,7 +137,9 @@ func TestAdapter(t *testing.T) {
 		t.Errorf("Expected LoadPolicy() to be successful; got %v", err)
 	}
 	// The policy has a new rule: {"alice", "data1", "write"}.
-	testGetPolicy(t, e, [][]string{{"alice", "data1", "read"}, {"bob", "data2", "write"}, {"data2_admin", "data2", "read"}, {"data2_admin", "data2", "write"}, {"alice", "data1", "write"}})
+	testGetPolicy(e, [][]string{{"alice", "data1", "read"}, {"bob", "data2", "write"}, {"data2_admin", "data2", "read"}, {"data2_admin", "data2", "write"}, {"alice", "data1", "write"}}, func(actual, wants [][]string) {
+		t.Error("got: ", actual, ", wants ", wants)
+	})
 
 	// Remove the added rule.
 	e.RemovePolicy("alice", "data1", "write")
@@ -142,7 +149,9 @@ func TestAdapter(t *testing.T) {
 	if err := e.LoadPolicy(); err != nil {
 		t.Errorf("Expected LoadPolicy() to be successful; got %v", err)
 	}
-	testGetPolicy(t, e, [][]string{{"alice", "data1", "read"}, {"bob", "data2", "write"}, {"data2_admin", "data2", "read"}, {"data2_admin", "data2", "write"}})
+	testGetPolicy(e, [][]string{{"alice", "data1", "read"}, {"bob", "data2", "write"}, {"data2_admin", "data2", "read"}, {"data2_admin", "data2", "write"}}, func(actual, wants [][]string) {
+		t.Error("got: ", actual, ", wants ", wants)
+	})
 
 	// Remove "data2_admin" related policy rules via a filter.
 	// Two rules: {"data2_admin", "data2", "read"}, {"data2_admin", "data2", "write"} are deleted.
@@ -150,19 +159,25 @@ func TestAdapter(t *testing.T) {
 	if err := e.LoadPolicy(); err != nil {
 		t.Errorf("Expected LoadPolicy() to be successful; got %v", err)
 	}
-	testGetPolicy(t, e, [][]string{{"alice", "data1", "read"}, {"bob", "data2", "write"}})
+	testGetPolicy(e, [][]string{{"alice", "data1", "read"}, {"bob", "data2", "write"}}, func(actual, wants [][]string) {
+		t.Error("got: ", actual, ", wants ", wants)
+	})
 
 	e.RemoveFilteredPolicy(1, "data1")
 	if err := e.LoadPolicy(); err != nil {
 		t.Errorf("Expected LoadPolicy() to be successful; got %v", err)
 	}
-	testGetPolicy(t, e, [][]string{{"bob", "data2", "write"}})
+	testGetPolicy(e, [][]string{{"bob", "data2", "write"}}, func(actual, wants [][]string) {
+		t.Error("got: ", actual, ", wants ", wants)
+	})
 
 	e.RemoveFilteredPolicy(2, "write")
 	if err := e.LoadPolicy(); err != nil {
 		t.Errorf("Expected LoadPolicy() to be successful; got %v", err)
 	}
-	testGetPolicy(t, e, [][]string{})
+	testGetPolicy(e, [][]string{}, func(actual, wants [][]string) {
+		t.Error("got: ", actual, ", wants ", wants)
+	})
 }
 
 func TestDeleteFilteredAdapter(t *testing.T) {
@@ -177,20 +192,26 @@ func TestDeleteFilteredAdapter(t *testing.T) {
 		t.Errorf("Expected LoadPolicy() to be successful; got %v", err)
 	}
 	// The policy has a new rule: {"alice", "data1", "write"}.
-	testGetPolicy(t, e, [][]string{{"domain1", "alice", "data3", "read", "accept", "service1"},
-		{"domain1", "alice", "data3", "write", "accept", "service2"}})
+	testGetPolicy(e, [][]string{{"domain1", "alice", "data3", "read", "accept", "service1"},
+		{"domain1", "alice", "data3", "write", "accept", "service2"}}, func(actual, wants [][]string) {
+		t.Error("got: ", actual, ", wants ", wants)
+	})
 	// test RemoveFiltered Policy with "" fileds
 	e.RemoveFilteredPolicy(0, "domain1", "", "", "read")
 	if err := e.LoadPolicy(); err != nil {
 		t.Errorf("Expected LoadPolicy() to be successful; got %v", err)
 	}
-	testGetPolicy(t, e, [][]string{{"domain1", "alice", "data3", "write", "accept", "service2"}})
+	testGetPolicy(e, [][]string{{"domain1", "alice", "data3", "write", "accept", "service2"}}, func(actual, wants [][]string) {
+		t.Error("got: ", actual, ", wants ", wants)
+	})
 
 	e.RemoveFilteredPolicy(0, "domain1", "", "", "", "", "service2")
 	if err := e.LoadPolicy(); err != nil {
 		t.Errorf("Expected LoadPolicy() to be successful; got %v", err)
 	}
-	testGetPolicy(t, e, [][]string{})
+	testGetPolicy(e, [][]string{}, func(actual, wants [][]string) {
+		t.Error("got: ", actual, ", wants ", wants)
+	})
 }
 
 func TestConfig(t *testing.T) {
@@ -200,14 +221,20 @@ func TestConfig(t *testing.T) {
 	// Use a difference kind name.
 	a := NewAdapterWithConfig(getDatastore(), AdapterConfig{Kind: "casbin_test_xx", Namespace: "unittest"})
 	e, _ := casbin.NewEnforcer("examples/rbac_model.conf", a)
-	testGetPolicy(t, e, [][]string{})
+	testGetPolicy(e, [][]string{}, func(actual, wants [][]string) {
+		t.Error("got: ", actual, ", wants ", wants)
+	})
 
 	// Use a difference namespace.
 	a = NewAdapterWithConfig(getDatastore(), AdapterConfig{Kind: "casbin_test", Namespace: "unittest_xx"})
 	e, _ = casbin.NewEnforcer("examples/rbac_model.conf", a)
-	testGetPolicy(t, e, [][]string{})
+	testGetPolicy(e, [][]string{}, func(actual, wants [][]string) {
+		t.Error("got: ", actual, ", wants ", wants)
+	})
 
 	a = NewAdapterWithConfig(getDatastore(), config)
 	e, _ = casbin.NewEnforcer("examples/rbac_model.conf", a)
-	testGetPolicy(t, e, [][]string{{"alice", "data1", "read"}, {"bob", "data2", "write"}, {"data2_admin", "data2", "read"}, {"data2_admin", "data2", "write"}})
+	testGetPolicy(e, [][]string{{"alice", "data1", "read"}, {"bob", "data2", "write"}, {"data2_admin", "data2", "read"}, {"data2_admin", "data2", "write"}}, func(actual, wants [][]string) {
+		t.Error("got: ", actual, ", wants ", wants)
+	})
 }
