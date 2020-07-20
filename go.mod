@@ -1,9 +1,8 @@
-module github.com/reedom/datastore-adapter/v2
+module github.com/reedom/datastore-adapter/v3
 
 go 1.14
 
 require (
 	cloud.google.com/go/datastore v1.1.0
 	github.com/casbin/casbin/v2 v2.2.2
-	github.com/reedom/datastore-adapter v1.0.2 // indirect
 )
