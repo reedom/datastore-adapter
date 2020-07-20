@@ -25,8 +25,8 @@ type CasbinRule struct {
 
 // adapter represents the GCP datastore adapter for policy storage.
 type adapter struct {
-	db *datastore.Client
-	kind string
+	db        *datastore.Client
+	kind      string
 	namespace string
 }
 
@@ -50,9 +50,7 @@ func NewAdapterWithConfig(db *datastore.Client, config Config) persist.Adapter {
 	if config.Kind != "" {
 		kind = config.Kind
 	}
-	namespace := config.Namespace
-
-	a := &adapter{db, kind, namespace}
+	a := &adapter{db, kind, config.Namespace}
 
 	// Call the destructor when the object is released.
 	runtime.SetFinalizer(a, finalizer)
@@ -60,10 +58,14 @@ func NewAdapterWithConfig(db *datastore.Client, config Config) persist.Adapter {
 	return a
 }
 
+func (a *adapter) pseudoRootKey() *datastore.Key {
+	key := datastore.IDKey(a.kind, 1, nil)
+	key.Namespace = a.namespace
+	return key
+}
+
 func (a *adapter) newQuery() *datastore.Query {
-	return datastore.NewQuery(a.kind).
-		Namespace(a.namespace).
-		Filter("p_type >", "")
+	return datastore.NewQuery(a.kind).Namespace(a.namespace).Filter("p_type >", "").Ancestor(a.pseudoRootKey())
 }
 
 func (a *adapter) LoadPolicy(model model.Model) error {
@@ -109,14 +111,14 @@ func (a *adapter) SavePolicy(model model.Model) error {
 		}
 	}
 
+	ancestor := a.pseudoRootKey()
 	_, err = a.db.RunInTransaction(ctx, func(tx *datastore.Transaction) error {
 		if err = tx.DeleteMulti(keys); err != nil {
 			return err
 		}
 
 		for _, line := range lines {
-
-			key := datastore.IncompleteKey(a.kind, nil)
+			key := datastore.IncompleteKey(a.kind, ancestor)
 			key.Namespace = a.namespace
 			_, err := tx.Put(key, line)
 			if err != nil {
@@ -131,18 +133,16 @@ func (a *adapter) SavePolicy(model model.Model) error {
 }
 
 func (a *adapter) AddPolicy(sec string, ptype string, rule []string) error {
-
 	ctx := context.Background()
 	line := savePolicyLine(ptype, rule)
 
-	key := datastore.IncompleteKey(a.kind, nil)
+	key := datastore.IncompleteKey(a.kind, a.pseudoRootKey())
 	key.Namespace = a.namespace
 	_, err := a.db.Put(ctx, key, &line)
 	return err
 }
 
 func (a *adapter) RemovePolicy(sec string, ptype string, rule []string) error {
-
 	var rules []*CasbinRule
 
 	line := savePolicyLine(ptype, rule)
